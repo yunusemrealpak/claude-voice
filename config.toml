@@ -1,0 +1,43 @@
+# claude-voice configuration. Every value here is optional; see voice/config.py
+# for the defaults. Device entries are case-insensitive substrings of the
+# PortAudio device names (`bin/voicectl devices` lists them); empty means the
+# system default device.
+#
+# Put machine-specific values in config.local.toml (git-ignored); it uses the
+# same sections and overrides this file. API keys and the ElevenLabs voice id
+# belong in .env, never here -- see .env.example.
+
+[audio]
+# With Bluetooth headphones, set this to the computer's built-in microphone in
+# config.local.toml: opening a headset's microphone drops macOS into the headset
+# profile, which ruins playback quality.
+mic     = ""
+speaker = ""        # system default output, i.e. the headphones when connected
+earcon  = true      # short blip when a spoken turn has been captured
+lead_in_ms = 300    # near-silent pause before each reply; earbuds swallow the first word without it
+keep_awake = true   # near-inaudible noise between replies, so Bluetooth audio never sleeps
+keep_awake_dbfs = -70.0
+
+[stt]
+language          = "tr"
+model             = "nova-3"
+endpointing_ms    = 300
+utterance_end_ms  = 1000
+turn_grace_ms     = 700     # after a finished sentence
+turn_grace_incomplete_ms = 2500  # after words that stop mid-sentence: a breath
+barge_in_min_chars = 2
+# Deepgram keyterm prompting: words it would otherwise mishear in Turkish speech.
+keyterms = ["Claude", "Claude Code", "endpoint", "controller", "repository", "commit", "deploy", "backend", "frontend", "API"]
+
+[tts]
+model            = "eleven_flash_v2_5"
+language         = "tr"
+output_format    = "pcm_24000"
+stability        = 0.5
+similarity_boost = 0.75
+speaker_boost    = true
+speed            = 1.0
+
+[daemon]
+idle_shutdown_s = 120
+reply_wait_s    = 8     # seconds of quiet, not a total: long interruptions are waited for

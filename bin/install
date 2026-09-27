@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Creates the virtualenv, installs dependencies and links the /sesli skill into Claude Code.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+PYTHON="${PYTHON:-$(command -v python3.12 || true)}"
+if [[ -z "$PYTHON" ]]; then
+  echo "python3.12 not found (brew install python@3.12)" >&2
+  exit 1
+fi
+[[ -d "$ROOT/.venv" ]] || "$PYTHON" -m venv "$ROOT/.venv"
+"$ROOT/.venv/bin/python" -m pip install -q -r "$ROOT/requirements-dev.txt"
+if [[ ! -f "$ROOT/.env" ]]; then
+  cp "$ROOT/.env.example" "$ROOT/.env"
+  chmod 600 "$ROOT/.env"
+  echo "created .env: fill in your Deepgram and ElevenLabs keys and voice id"
+fi
+mkdir -p "$HOME/.claude/skills"
+ln -sfn "$ROOT/skill/sesli" "$HOME/.claude/skills/sesli"
+
+# The VS Code extension behind `voicectl show` (code walkthroughs).
+if command -v code >/dev/null && command -v npx >/dev/null; then
+  mkdir -p "$ROOT/build"
+  (cd "$ROOT/vscode-extension" && npx --yes @vscode/vsce package --allow-missing-repository \
+     -o "$ROOT/build/claude-voice-guide.vsix" >/dev/null)
+  code --install-extension "$ROOT/build/claude-voice-guide.vsix" --force >/dev/null 2>&1
+  echo "VS Code extension installed"
+else
+  echo "skipped the VS Code extension: needs the 'code' command and npx" >&2
+fi
+echo "installed; /sesli is available in new Claude Code sessions"

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Runs the claude-voice CLI from this checkout's virtualenv, wherever it is called from.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+PYTHONPATH="$ROOT" exec "$ROOT/.venv/bin/python" -m voice "$@"

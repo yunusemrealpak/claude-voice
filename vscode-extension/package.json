@@ -1,0 +1,29 @@
+{
+  "name": "claude-voice-guide",
+  "displayName": "Claude Voice Guide",
+  "description": "Lets claude-voice open a file and highlight lines while it explains the code aloud.",
+  "version": "0.2.0",
+  "publisher": "claude-voice",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onUri"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeVoiceGuide.clear",
+        "title": "Claude Voice Guide: Clear highlight"
+      }
+    ]
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  }
+}
