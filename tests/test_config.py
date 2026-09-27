@@ -1,5 +1,7 @@
 """Settings layering and where credentials may come from."""
 
+import pytest
+
 from voice.config import load_config, load_keys
 
 
@@ -30,3 +32,17 @@ def test_missing_credentials_and_voice_are_reported(tmp_path, monkeypatch):
 def test_the_voice_id_comes_from_the_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("ELEVENLABS_VOICE_ID", "voice-from-env")
     assert load_keys(tmp_path / "missing.env").voice_id == "voice-from-env"
+
+
+def test_the_wake_word_is_off_unless_a_name_is_configured(tmp_path):
+    tracked = tmp_path / "config.toml"
+    local = tmp_path / "config.local.toml"
+    tracked.write_text("[wake]\nenabled = false\nwords = []\n")
+    assert load_config(tracked, local).wake.enabled is False
+
+    local.write_text('[wake]\nenabled = true\nwords = ["Tulpar"]\n')
+    assert load_config(tracked, local).wake.words == ("Tulpar",)
+
+    local.write_text("[wake]\nenabled = true\n")
+    with pytest.raises(ValueError, match="needs a name"):
+        load_config(tracked, local)

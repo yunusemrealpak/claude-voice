@@ -71,6 +71,10 @@ class WakeConfig:
     # After the name alone ("Cezeri."), how long the next turn counts without it.
     window_s: float = 8.0
 
+    def __post_init__(self):
+        if self.enabled and not self.words:
+            raise ValueError('config: [wake] enabled = true needs a name, e.g. words = ["Jarvis"]')
+
 
 @dataclass(frozen=True)
 class WalkthroughConfig:

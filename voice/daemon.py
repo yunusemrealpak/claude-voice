@@ -283,7 +283,7 @@ class VoiceDaemon:
                     else:
                         log.info("ignored a turn not addressed to the assistant (%d so far)", self._ignored)
                     return
-                command = text  # the words that follow a bare "Cezeri."
+                command = text  # the words that follow the name said alone
             self._armed_until = 0.0
             if not command:
                 # Only the name: acknowledge, then take the next turn without it.

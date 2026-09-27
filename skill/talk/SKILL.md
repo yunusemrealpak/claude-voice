@@ -30,8 +30,8 @@ starts talking is the daemon's job, not yours: playback stops by itself.
    description `voice input`, and `timeout_ms: 1800000`.
 3. Greet with one short spoken sentence, for example
    `$VOICECTL speak "Voice mode is on, I'm listening."`. With a wake word, the
-   greeting tells the user to start with the name ("Say Cezeri first when you
-   talk to me").
+   greeting tells the user to start with the name, taken from `wake=<name>` in
+   the status line ("Say Jarvis first when you talk to me").
 
 ## Keeping it alive
 

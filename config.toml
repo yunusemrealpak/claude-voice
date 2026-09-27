@@ -41,8 +41,9 @@ speed            = 1.0
 [wake]
 # Only speech that opens with the assistant's name is a command ("Cezeri, run
 # the tests"); talking to someone else near the microphone is ignored and not
-# recorded. Pick a name unlike any everyday word in your language, or the
-# transcriber starts hearing it in ordinary speech.
+# recorded. Change the name to your own: pick one unlike any everyday word in
+# your language, or the transcriber starts hearing it in ordinary speech.
+# Several names may be listed; enabled = false turns the filter off.
 enabled  = true
 words    = ["Cezeri"]
 window_s = 8          # after the name alone, how long the next sentence counts without it

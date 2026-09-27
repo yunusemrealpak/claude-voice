@@ -83,14 +83,27 @@ State lives in `~/.claude-voice/`:
 
 ## Wake word
 
-The microphone also hears you talking to other people. With `[wake] enabled`,
-only speech that opens with the assistant's name counts, for example "Cezeri,
-run the tests". A filler such as "hey" or "tamam" in front is fine. The name is
+The microphone also hears you talking to other people. With a wake word, only
+speech that opens with the assistant's name counts, for example "Cezeri, run
+the tests". A filler such as "hey" or "tamam" in front is fine. The name is
 stripped before the text reaches Claude. Anything else is dropped and never
 written to the transcript. Saying the name alone ("Cezeri.") plays the
 "heard you" blip, and the next sentence then counts without it for `window_s`
 seconds. Interrupting Claude needs the name too, so someone talking nearby does
 not cut a reply short.
+
+The name is Cezeri by default and yours to change: edit `[wake] words` in
+`config.toml`, or override it in `config.local.toml`. Several names may be
+listed, and any of them works; `enabled = false` turns the filter off.
+
+```toml
+[wake]
+enabled = true
+words   = ["Jarvis"]
+```
+
+`voicectl status` shows the active name as `wake=<name>`, and Claude's greeting
+tells you which name to use.
 
 Choose a name that sounds like no everyday word in your language. The name is
 passed to Deepgram as a keyterm so that it is heard reliably. If it resembles a
