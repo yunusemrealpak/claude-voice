@@ -1,13 +1,13 @@
 ---
-name: sesli
-description: Voice mode. Listens to the user's microphone and answers aloud with ElevenLabs, alongside the normal terminal session. "/sesli" starts it, "/sesli kapat" stops it, "/sesli durum" reports its state.
-argument-hint: "[kapat | durum]"
+name: talk
+description: Voice mode. Listens to the user's microphone and answers aloud with ElevenLabs, alongside the normal terminal session. "/talk" starts it, "/talk stop" stops it, "/talk status" reports its state.
+argument-hint: "[stop | status]"
 disable-model-invocation: true
 ---
 
-# Voice mode (sesli mod)
+# Voice mode
 
-`VOICECTL=~/.claude/skills/sesli/voicectl` (a link into this repository's `bin/`)
+`VOICECTL=~/.claude/skills/talk/voicectl` (a link into this repository's `bin/`)
 
 The daemon owns the microphone and the headphones. You hear the user through a
 Monitor, and you talk with `$VOICECTL speak`. Cutting you off when the user
@@ -15,10 +15,10 @@ starts talking is the daemon's job, not yours: playback stops by itself.
 
 ## Arguments: $ARGUMENTS
 
-- `kapat` / `stop`: run `$VOICECTL shutdown`, stop the listen Monitor with
+- `stop` (or `kapat`): run `$VOICECTL shutdown`, stop the listen Monitor with
   TaskStop, and confirm in one written line. Voice mode is over; ignore the rest
   of this file.
-- `durum` / `status`: run `$VOICECTL status` and report it in one line.
+- `status` (or `durum`): run `$VOICECTL status` and report it in one line.
 - Anything else, or nothing: start voice mode as below.
 
 ## Starting
@@ -26,9 +26,9 @@ starts talking is the daemon's job, not yours: playback stops by itself.
 1. `$VOICECTL start`. If it fails, show the log tail it prints and stop there.
 2. Arm the listener straight away: the daemon exits after two minutes with no
    listener. Use Monitor with command `$VOICECTL listen` (expanded path),
-   description `sesli giriş`, and `timeout_ms: 1800000`.
+   description `voice input`, and `timeout_ms: 1800000`.
 3. Greet with one short spoken sentence, for example
-   `$VOICECTL speak "Sesli moddayız, dinliyorum."`
+   `$VOICECTL speak "Voice mode is on, I'm listening."`
 
 ## Keeping it alive
 
@@ -47,7 +47,7 @@ Every `🎤 ...` event is something the user said aloud. Treat it like a typed
 message, with these differences:
 
 - It is a transcript, so expect errors. When a turn is garbled, is a lone
-  fragment ("Bu", "şey"), or could mean two different things, ask one short
+  fragment ("so", "um"), or could mean two different things, ask one short
   spoken question instead of guessing.
 - Several turns in quick succession are one thought with pauses in it. Read
   them together before acting.
@@ -60,14 +60,14 @@ message, with these differences:
 
 ## Muting
 
-When the user asks to mute the microphone ("mikrofonu kapat", "sustur",
-"beni dinleme"), do three things in order:
+When the user asks to mute the microphone ("mute", "stop listening"), do three
+things in order:
 
 1. Confirm aloud in one sentence.
 2. Run `$VOICECTL mute`.
 3. In the terminal, explain how to unmute. While muted you cannot hear them, so
-   they type it: any typed "aç" / "mikrofonu aç" works, or
-   `! ~/.claude/skills/sesli/voicectl unmute`.
+   they type it: any typed "unmute" works, or
+   `! ~/.claude/skills/talk/voicectl unmute`.
 
 When they ask to unmute, run `$VOICECTL unmute` and say one short sentence.
 Muting sends no audio anywhere; the daemon keeps running.
@@ -90,39 +90,43 @@ Do not narrate individual steps or tool calls.
 
 How spoken text differs from written text:
 
-- Natural spoken Turkish. No markdown, no bullet lists, no code, no symbols.
-- Say what a thing is ("kullanıcı servisindeki doğrulama fonksiyonu"), not its
-  path or identifier character by character. English technical terms are fine.
+- Speak the language the user speaks to you; it matches `[stt] language` in
+  config.toml. Use natural spoken sentences. No markdown, no bullet lists, no
+  code, no symbols.
+- Say what a thing is ("the validation function in the user service"), not its
+  path or identifier character by character. English technical terms are fine
+  in any language.
 - Keep it short. Detail belongs in the terminal, which you keep writing as
   usual.
 - Pass text as one quoted argument. For text with quotes or apostrophes, use
   `speak -` and a quoted heredoc.
 
-## Code walkthrough (kod turu)
+## Code walkthrough
 
-When the user asks to be walked through code ("mimariyi anlat", "kodu
-göstererek anlat"), you show each part in VS Code while you explain it.
+When the user asks to be walked through code ("explain the architecture",
+"walk me through the code"), you show each part in VS Code while you explain it.
 
 1. **Prepare first.** Read enough of the code to understand the architecture.
    Then plan 5–10 stops in the order a newcomer should see them: entry point,
    main flow, key modules, then cross-cutting concerns. Each stop is one file
    and a line range covering a whole function or class, at most ~40 lines, with
    20–40 seconds of narration.
-2. **Answer first, as always.** Say in one sentence how the tour will go
-   ("Altı durakta anlatacağım: önce giriş noktası, sonra..."). Also write the
-   stops in the terminal as `file:start-end — topic`, so the user has a map.
+2. **Answer first, as always.** Say in one sentence how the tour will go ("Six
+   stops: first the entry point, then..."). Also write the stops in the terminal
+   as `file:start-end — topic`, so the user has a map.
 3. `code <project root>` once, so the right VS Code window is in front.
 4. **Each stop** is one Bash call with a timeout of at least 180000 ms:
    `$VOICECTL show <file> <start> <end> && $VOICECTL speak --wait "<narration>"`.
-   The narration explains what the highlighted code does and why it is built
-   that way. It points at what is on screen ("vurgulu bloğun başındaki
-   kontrol...") and never reads code aloud.
+   Check the line numbers right before showing them, because edits made during
+   the tour shift them. The narration explains what the highlighted code does
+   and why it is built that way. It points at what is on screen ("the check at
+   the top of the highlighted block...") and never reads code aloud.
 5. **After each stop:**
    - `done`: go on to the next stop.
    - `interrupted; the user said: X`: X is a question or an instruction. Answer
      it, showing other code if that helps. Then ask aloud with `speak --wait`
-     whether to continue from where you stopped, and act on the answer. "Dur" or
-     "yeter" ends the tour.
+     whether to continue from where you stopped, and act on the answer. "Stop"
+     or "enough" ends the tour.
 6. **At the end:** `$VOICECTL show --clear`, then a spoken summary of two or
    three sentences.
 

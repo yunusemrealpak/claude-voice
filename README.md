@@ -1,6 +1,6 @@
 # claude-voice
 
-Spoken conversation with Claude Code. `/sesli` in any session starts listening to
+Spoken conversation with Claude Code. `/talk` in any session starts listening to
 the microphone. Claude answers aloud through ElevenLabs, and the terminal keeps
 working as usual. Start talking while Claude speaks and it stops mid-word; what
 you say becomes the next message.
@@ -23,7 +23,7 @@ headphones ◄──────┤◄── ElevenLabs (streaming) ◄── vo
 - **Output from Claude.** `voicectl speak "..."` queues speech and returns.
   `--wait` blocks until the speech ends. If the user interrupts, it returns what
   they said instead.
-- **The skill** (`skill/sesli/SKILL.md`) tells Claude how to behave in voice
+- **The skill** (`skill/talk/SKILL.md`) tells Claude how to behave in voice
   mode. It answers aloud first and then works. It speaks at milestones only, not
   at every step. Destructive or outward-facing actions need a *typed*
   confirmation, because the microphone also hears the room.
@@ -35,7 +35,7 @@ ElevenLabs API key and an ElevenLabs voice to speak with.
 
 ```bash
 bin/install          # virtualenv, dependencies, .env from .env.example,
-                     # ~/.claude/skills/sesli symlink, VS Code extension
+                     # ~/.claude/skills/talk symlink, VS Code extension
 $EDITOR .env         # DEEPGRAM_API_KEY, ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID
 bin/voicectl selftest
 ```
@@ -83,7 +83,7 @@ State lives in `~/.claude-voice/`:
 
 ## Code walkthroughs
 
-Ask for a walkthrough in voice mode ("mimariyi kodları göstererek anlat"). Claude
+Ask for a walkthrough in voice mode ("walk me through the architecture"). Claude
 plans the stops, then goes through them one at a time:
 
 1. It highlights each block in VS Code with `voicectl show`.
@@ -104,6 +104,10 @@ again".
 
 `config.toml` holds the settings. Every value is optional, and the defaults are
 in `voice/config.py`.
+
+- **`[stt] language` and `[tts] language`** are the language you speak and the
+  language Claude answers in. Both default to Turkish (`tr`). Set both to your
+  own, for example `en`, and Claude follows in the language it speaks.
 
 - **`[audio] mic`** defaults to the system input. With Bluetooth headphones, set
   it to the computer's built-in microphone in `config.local.toml`. Opening a
