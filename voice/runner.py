@@ -9,6 +9,7 @@ from pathlib import Path
 from voice.config import Config, Keys
 from voice.daemon import VoiceDaemon
 from voice.paths import TRANSCRIPT_PATH
+from voice.wake import WakeWord
 
 
 def build(cfg: Config, keys: Keys) -> VoiceDaemon:
@@ -36,6 +37,7 @@ def build(cfg: Config, keys: Keys) -> VoiceDaemon:
         keep_awake_dbfs=cfg.audio.keep_awake_dbfs if cfg.audio.keep_awake else None,
     )
     mic = Microphone(cfg.audio.mic)
+    wake = WakeWord(cfg.wake.words) if cfg.wake.enabled else None
     stt = DeepgramStt(
         keys.deepgram,
         cfg.stt.language,
@@ -45,7 +47,8 @@ def build(cfg: Config, keys: Keys) -> VoiceDaemon:
         utterance_end_ms=cfg.stt.utterance_end_ms,
         turn_grace_ms=cfg.stt.turn_grace_ms,
         turn_grace_incomplete_ms=cfg.stt.turn_grace_incomplete_ms,
-        keyterms=cfg.stt.keyterms,
+        # The name has to be heard reliably, or nothing gets through.
+        keyterms=cfg.stt.keyterms + (tuple(cfg.wake.words) if wake else ()),
     )
     return VoiceDaemon(
         mic=mic,
@@ -58,6 +61,8 @@ def build(cfg: Config, keys: Keys) -> VoiceDaemon:
         idle_shutdown_s=cfg.daemon.idle_shutdown_s,
         reply_wait_s=cfg.daemon.reply_wait_s,
         transcript_path=TRANSCRIPT_PATH,
+        wake=wake,
+        wake_window_s=cfg.wake.window_s,
     )
 
 

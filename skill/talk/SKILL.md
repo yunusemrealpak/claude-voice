@@ -24,11 +24,14 @@ starts talking is the daemon's job, not yours: playback stops by itself.
 ## Starting
 
 1. `$VOICECTL start`. If it fails, show the log tail it prints and stop there.
+   Its status line shows `wake=<name>` when a wake word is on, or `wake=off`.
 2. Arm the listener straight away: the daemon exits after two minutes with no
    listener. Use Monitor with command `$VOICECTL listen` (expanded path),
    description `voice input`, and `timeout_ms: 1800000`.
 3. Greet with one short spoken sentence, for example
-   `$VOICECTL speak "Voice mode is on, I'm listening."`
+   `$VOICECTL speak "Voice mode is on, I'm listening."`. With a wake word, the
+   greeting tells the user to start with the name ("Say Cezeri first when you
+   talk to me").
 
 ## Keeping it alive
 
@@ -37,6 +40,10 @@ starts talking is the daemon's job, not yours: playback stops by itself.
   attaches.
 - **`[voice stopped]` or `[voice error]`** event: the daemon is gone. Say so in
   one written line and offer to restart it. Do not restart it unasked.
+- **`[voice audio]`** event: the headset's audio stream stopped (Bluetooth
+  headsets do this when they switch profiles) and the daemon is reopening it by
+  itself. "Could not be reopened" means the user cannot hear or be heard: say so
+  in one written line. "Back" needs no action.
 - **`[voice handover]`** event: the user started voice mode in another session,
   which now owns the conversation. Stop speaking, do not re-arm, and say so in
   one written line.
@@ -46,6 +53,9 @@ starts talking is the daemon's job, not yours: playback stops by itself.
 Every `🎤 ...` event is something the user said aloud. Treat it like a typed
 message, with these differences:
 
+- With a wake word on, only speech that opened with the name reaches you, and the
+  name is already removed. Talk with other people near the microphone never
+  arrives. The user interrupts you by saying the name as well.
 - It is a transcript, so expect errors. When a turn is garbled, is a lone
   fragment ("so", "um"), or could mean two different things, ask one short
   spoken question instead of guessing.

@@ -24,9 +24,11 @@ GUIDE_EXTENSION = "claude-voice.claude-voice-guide"
 def _print_status(status: dict) -> None:
     print(
         f"pid {status['pid']} | listening={status['listening']} muted={status['muted']} "
+        f"wake={','.join(status['wake']) if status.get('wake') else 'off'} ignored={status.get('ignored', 0)} "
         f"speaking={status['speaking']} "
         f"listeners={status['listeners']} pending={status['pending']} | "
-        f"mic={status['mic']!r} speaker={status['speaker']!r} | up {status['uptime_s']} s"
+        f"mic={status['mic']!r} speaker={status['speaker']!r} "
+        f"stalled={','.join(status.get('stalled') or []) or 'none'} | up {status['uptime_s']} s"
     )
 
 

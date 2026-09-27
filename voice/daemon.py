@@ -14,6 +14,9 @@ Barge-in never waits for Claude: the moment the transcriber hears words while
 speech is playing, playback is cut and the queue is dropped. The words the user
 then says become a turn like any other -- or, when the interrupted `speak` asked
 to wait, the answer to that call.
+
+With a wake word, only speech that opens with the assistant's name counts: as a
+turn and as a barge-in. Everything else is dropped without being recorded.
 """
 
 from __future__ import annotations
@@ -29,10 +32,15 @@ from datetime import datetime
 from pathlib import Path
 
 from voice.stt import SpeechActivity, SttFailed, Turn
+from voice.wake import WakeWord
 
 log = logging.getLogger("daemon")
 
 PENDING_MAX = 50
+# An audio stream whose callbacks stop for this long is dead, not quiet: both
+# streams run continuously, silence included, one callback every 20 ms.
+AUDIO_STALL_S = 3.0
+AUDIO_RETRY_MAX_S = 30.0
 
 
 def now_iso() -> str:
@@ -68,6 +76,10 @@ class VoiceDaemon:
         reply_wait_s: float = 20.0,
         transcript_path: Path | None = None,
         watchdog_interval: float = 5.0,
+        audio_check_interval: float = 1.0,
+        restart_audio=None,
+        wake: WakeWord | None = None,
+        wake_window_s: float = 8.0,
     ):
         self.mic = mic
         self.speaker = speaker
@@ -80,6 +92,12 @@ class VoiceDaemon:
         self.reply_wait_s = reply_wait_s
         self.transcript_path = transcript_path
         self.watchdog_interval = watchdog_interval
+        self.audio_check_interval = audio_check_interval
+        self._restart_audio = restart_audio or self._reopen_streams
+        self.wake = wake
+        self.wake_window_s = wake_window_s
+        self._armed_until = 0.0
+        self._ignored = 0
 
         self.muted = False
         self._stopping = asyncio.Event()
@@ -102,8 +120,11 @@ class VoiceDaemon:
         socket_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         socket_path.unlink(missing_ok=True)
 
-        await self.speaker.start()
+        # Microphone first: opening a Bluetooth headset's microphone switches the
+        # headset to its call profile, which changes the output device's rate;
+        # the speaker stream is opened after that switch rather than through it.
         await self.mic.start()
+        await self.speaker.start()
         await self.stt.start()
         await self.tts.start()
         server = await asyncio.start_unix_server(self._handle_client, path=str(socket_path))
@@ -115,6 +136,7 @@ class VoiceDaemon:
             asyncio.create_task(self._consume_stt(), name="consume-stt"),
             asyncio.create_task(self._speak_worker(), name="speak-worker"),
             asyncio.create_task(self._watchdog(), name="watchdog"),
+            asyncio.create_task(self._audio_watchdog(), name="audio-watchdog"),
         ]
         log.info("ready on %s", socket_path)
         try:
@@ -158,20 +180,105 @@ class VoiceDaemon:
                 self._stopping.set()
                 return
 
+    def _stalled_streams(self) -> list[str]:
+        now = time.monotonic()
+        return [
+            name for name, device in (("mic", self.mic), ("speaker", self.speaker))
+            if now - getattr(device, "last_audio_at", now) >= AUDIO_STALL_S
+        ]
+
+    async def _audio_watchdog(self) -> None:
+        """Reopen the audio streams when one of them stops running.
+
+        A Bluetooth headset that falls back from its call profile during a long
+        silence kills the streams without an error reaching us (CoreAudio only
+        prints one), and the daemon would go on looking alive while deaf.
+        """
+        failures = 0
+        next_try = 0.0
+        while True:
+            await asyncio.sleep(self.audio_check_interval)
+            stalled = self._stalled_streams()
+            if not stalled or time.monotonic() < next_try:
+                if not stalled:
+                    failures = 0
+                continue
+            log.warning("audio: no callbacks from %s for %.0f s; reopening the streams",
+                        " and ".join(stalled), AUDIO_STALL_S)
+            try:
+                # Opening a CoreAudio stream can block for a while; keep the loop free.
+                await asyncio.to_thread(self._restart_audio)
+            except Exception as exc:  # noqa: BLE001 - report it and keep trying
+                failures += 1
+                next_try = time.monotonic() + min(AUDIO_RETRY_MAX_S, 2 ** failures)
+                log.error("audio: reopening failed (attempt %d): %s", failures, exc)
+                if failures == 1:
+                    self._publish({"type": "audio",
+                                   "text": f"the audio device stopped and could not be reopened: {exc}"})
+            else:
+                log.info("audio: streams reopened")
+                if failures:
+                    self._publish({"type": "audio", "text": "the audio device is back"})
+                failures = 0
+
+    def _reopen_streams(self) -> None:
+        from .audio import rescan_devices
+
+        self.mic.close()
+        self.speaker.close()
+        rescan_devices()
+        # Microphone first, as at start-up.
+        self.mic.open(rescan=True)
+        self.speaker.open(rescan=True)
+
     # ------------------------------------------------------------------ hearing
 
     async def _consume_stt(self) -> None:
         async for event in self.stt:
             if isinstance(event, SpeechActivity):
                 self._last_speech_at = time.monotonic()
-                if self.speaking and len(event.text) >= self.barge_in_min_chars:
+                if (
+                    self.speaking
+                    and len(event.text) >= self.barge_in_min_chars
+                    and (self.wake is None or self.wake.mentions(event.text))
+                ):
                     self.barge_in(by_user=True)
             elif isinstance(event, Turn):
-                self._on_turn(event.text, source="mic")
+                self._on_heard(event.text)
             elif isinstance(event, SttFailed):
                 self._publish({"type": "error", "text": event.reason})
                 self._stopping.set()
                 return
+
+    def _on_heard(self, text: str) -> None:
+        """A turn from the microphone: pass it on if it was meant for the assistant."""
+        if self.wake is not None:
+            now = time.monotonic()
+            command = self.wake.addressed(text)
+            if command is None:
+                if now >= self._armed_until:
+                    # Not for us: neither delivered nor recorded.
+                    self._ignored += 1
+                    near = self.wake.near_miss(text)
+                    if near:
+                        # Only the first word, and only when it resembles the name:
+                        # enough to tune the wake word, not a record of the talk.
+                        log.info("ignored a turn opening with %r, close to the wake word (%d so far)",
+                                 near, self._ignored)
+                    else:
+                        log.info("ignored a turn not addressed to the assistant (%d so far)", self._ignored)
+                    return
+                command = text  # the words that follow a bare "Cezeri."
+            self._armed_until = 0.0
+            if not command:
+                # Only the name: acknowledge, then take the next turn without it.
+                self._armed_until = now + self.wake_window_s
+                if self.earcon:
+                    self.speaker.write(self.earcon)
+                log.info("wake word alone; listening for %.0f s", self.wake_window_s)
+                return
+            text = command
+        self._on_turn(text, source="mic")
 
     def _on_turn(self, text: str, *, source: str) -> None:
         self._record("user", text, source=source)
@@ -398,6 +505,9 @@ class VoiceDaemon:
             "pid": os.getpid(),
             "listening": bool(getattr(self.stt, "connected", False)),
             "muted": self.muted,
+            "wake": list(self.wake.words) if self.wake else None,
+            "ignored": self._ignored,
+            "stalled": self._stalled_streams(),
             "speaking": self.speaking,
             "queued": self._jobs.qsize(),
             "listeners": len(self._listeners),

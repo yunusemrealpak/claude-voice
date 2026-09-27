@@ -4,12 +4,14 @@ import asyncio
 import json
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
 
 from voice.daemon import VoiceDaemon
 from voice.stt import SpeechActivity, SttFailed, Turn
+from voice.wake import WakeWord
 
 
 class FakeMic:
@@ -377,3 +379,102 @@ def test_a_waiting_speak_gives_up_once_the_user_goes_quiet(socket_dir):
     response, event = run_with_daemon(socket_dir, scenario, tts=FakeTts(chunks=100), reply_wait_s=0.3)
     assert response == {"ok": True, "result": "interrupted", "heard": None}
     assert event["text"] == "sonradan gelen söz"
+
+
+CEZERI = WakeWord(["Cezeri"])
+
+
+def test_with_a_wake_word_only_addressed_speech_gets_through(socket_dir):
+    async def scenario(daemon, sock, stt, speaker, tts):
+        listener, listener_writer = await attach_listener(sock)
+        stt.emit(Turn("Yarın toplantı var, unutma.", 0.0))
+        stt.emit(Turn("Cezeri, testleri çalıştır.", 0.0))
+        event = await next_event(listener)
+        return event, daemon.status()["ignored"]
+
+    event, ignored = run_with_daemon(socket_dir, scenario, wake=CEZERI)
+    assert event["text"] == "testleri çalıştır."
+    assert ignored == 1
+
+
+def test_the_name_alone_opens_a_short_window_for_the_next_sentence(socket_dir):
+    async def scenario(daemon, sock, stt, speaker, tts):
+        listener, listener_writer = await attach_listener(sock)
+        stt.emit(Turn("Cezeri.", 0.0))
+        stt.emit(Turn("bir saniye bekle", 0.0))
+        within = await next_event(listener)
+        await asyncio.sleep(0.25)  # the window has closed
+        stt.emit(Turn("bu da başka biriyle konuşma", 0.0))
+        with pytest.raises(asyncio.TimeoutError):
+            await next_event(listener, timeout=0.2)
+        return within
+
+    event = run_with_daemon(socket_dir, scenario, wake=CEZERI, wake_window_s=0.1)
+    assert event["text"] == "bir saniye bekle"
+
+
+def test_with_a_wake_word_only_the_name_interrupts_speech(socket_dir):
+    async def scenario(daemon, sock, stt, speaker, tts):
+        await call(sock, {"cmd": "speak", "text": "uzun anlatım"})
+        await asyncio.sleep(0.05)
+        stt.emit(SpeechActivity("merhaba, nasılsın"))  # someone else in the room
+        await asyncio.sleep(0.05)
+        before = speaker.cleared
+        stt.emit(SpeechActivity("Cezeri dur"))
+        await asyncio.sleep(0.05)
+        return before, speaker.cleared
+
+    before, after = run_with_daemon(socket_dir, scenario, tts=FakeTts(chunks=100), wake=CEZERI)
+    assert before == 0
+    assert after >= 1
+
+
+def test_speech_that_was_not_for_the_assistant_is_not_recorded(socket_dir, tmp_path):
+    transcript = tmp_path / "transcript.jsonl"
+
+    async def scenario(daemon, sock, stt, speaker, tts):
+        stt.emit(Turn("Bu akşam yemeğe gelecek misin?", 0.0))
+        stt.emit(Turn("Cezeri, durum nedir?", 0.0))
+        await asyncio.sleep(0.05)
+
+    run_with_daemon(socket_dir, scenario, wake=CEZERI, transcript_path=transcript)
+    recorded = [json.loads(line)["text"] for line in transcript.read_text().splitlines()]
+    assert recorded == ["durum nedir?"]
+
+
+def test_a_stream_that_stops_running_is_reopened_and_the_listener_told_if_that_fails(socket_dir):
+    attempts = []
+
+    def restart_audio():
+        attempts.append(time.monotonic())
+        if len(attempts) == 1:
+            raise RuntimeError("device busy")
+        speaker.last_audio_at = time.monotonic()
+
+    async def scenario(daemon, sock, stt, speaker_, tts):
+        nonlocal speaker
+        speaker = speaker_
+        reader, _writer = await attach_listener(sock)
+        speaker.last_audio_at = time.monotonic() - 10  # no callbacks for 10 s
+
+        failed = await next_event(reader, timeout=3)
+        assert failed["type"] == "audio" and "device busy" in failed["text"]
+        back = await next_event(reader, timeout=5)
+        assert back == {**back, "type": "audio", "text": "the audio device is back"}
+        assert len(attempts) == 2
+        assert (await call(sock, {"cmd": "status"}))["stalled"] == []
+
+    speaker = None
+    run_with_daemon(socket_dir, scenario, audio_check_interval=0.05, restart_audio=restart_audio)
+
+
+def test_streams_that_keep_running_are_left_alone(socket_dir):
+    attempts = []
+
+    async def scenario(daemon, sock, stt, speaker, tts):
+        speaker.last_audio_at = time.monotonic()
+        await asyncio.sleep(0.3)
+        assert attempts == []
+
+    run_with_daemon(socket_dir, scenario, audio_check_interval=0.05,
+                    restart_audio=lambda: attempts.append(1))

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 
 import numpy as np
 import sounddevice as sd
@@ -34,9 +35,11 @@ class Microphone:
 
     def __init__(self, device_name: str, rate: int = 16000, chunk_ms: int = CHUNK_MS):
         self.rate = rate
+        self._device_name = device_name
         self.device = find_device(device_name, "input")
         self._blocksize = max(1, int(rate * chunk_ms / 1000))
         self._warmup_frames = int(rate * MIC_WARMUP_MS / 1000)
+        self.last_audio_at = time.monotonic()
         self._queue: asyncio.Queue[bytes | None] = asyncio.Queue(CAPTURE_QUEUE_MAXSIZE)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stream: sd.RawInputStream | None = None
@@ -44,6 +47,14 @@ class Microphone:
 
     async def start(self) -> None:
         self._loop = asyncio.get_running_loop()
+        self.open()
+
+    def open(self, *, rescan: bool = False) -> None:
+        """Open the capture stream; with `rescan`, look the device up again first."""
+        if rescan:
+            self.device = find_device(self._device_name, "input")
+        self._warmup_frames = int(self.rate * MIC_WARMUP_MS / 1000)
+        self.last_audio_at = time.monotonic()
         self._stream = sd.RawInputStream(
             device=self.device.index,
             channels=1,
@@ -58,6 +69,7 @@ class Microphone:
 
     def _callback(self, indata, frames, time_info, status) -> None:
         """PortAudio thread: hand the block over, never block."""
+        self.last_audio_at = time.monotonic()
         if self._warmup_frames > 0:
             self._warmup_frames -= frames
             return
@@ -76,11 +88,13 @@ class Microphone:
             if self._dropped <= 5 or self._dropped % 100 == 0:
                 log.warning("mic: capture queue full, dropped %d chunks", self._dropped)
 
+    def close(self) -> None:
+        """Close the capture stream; the chunk iterator stays alive for a reopen."""
+        _close_stream(self._stream, "mic")
+        self._stream = None
+
     async def stop(self) -> None:
-        if self._stream is not None:
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None
+        self.close()
         self._offer(None)
 
     async def __aiter__(self):
@@ -111,18 +125,37 @@ class Speaker:
         keep_awake_dbfs: float | None = KEEP_AWAKE_DBFS,
     ):
         self.rate = rate
-        self.device = find_device(device_name, "output")
-        # Stereo even for mono speech: a mono stream plays in the left ear only.
-        self._channels = min(self.device.max_output_channels, 2)
+        self._device_name = device_name
+        self._keep_awake_dbfs = keep_awake_dbfs
         self._blocksize = max(1, int(rate * block_ms / 1000))
-        self._frame_bytes = 2 * self._channels
-        self._idle = self._idle_signal(keep_awake_dbfs)
-        self._idle_pos = 0
         self._buffer = bytearray()
         self._lock = threading.Lock()
         self._stream: sd.RawOutputStream | None = None
+        self.last_audio_at = time.monotonic()
+        self._use_device(find_device(device_name, "output"))
+
+    def _use_device(self, device) -> None:
+        self.device = device
+        # Stereo even for mono speech: a mono stream plays in the left ear only.
+        self._channels = min(device.max_output_channels, 2)
+        self._frame_bytes = 2 * self._channels
+        self._idle = self._idle_signal(self._keep_awake_dbfs)
+        self._idle_pos = 0
 
     async def start(self) -> None:
+        self.open()
+
+    def open(self, *, rescan: bool = False) -> None:
+        """Open the output stream; with `rescan`, look the device up again first.
+
+        A rescan can change the channel count, so whatever was queued in the old
+        layout is dropped.
+        """
+        if rescan:
+            with self._lock:
+                self._buffer.clear()
+            self._use_device(find_device(self._device_name, "output"))
+        self.last_audio_at = time.monotonic()
         self._stream = sd.RawOutputStream(
             device=self.device.index,
             channels=self._channels,
@@ -154,6 +187,7 @@ class Speaker:
 
     def _callback(self, outdata, frames, time_info, status) -> None:
         """PortAudio thread: pull from the FIFO and fill the rest with the idle signal."""
+        self.last_audio_at = time.monotonic()
         wanted = frames * self._frame_bytes
         with self._lock:
             take = min(wanted, len(self._buffer))
@@ -200,11 +234,34 @@ class Speaker:
             await asyncio.sleep(0.02)
         await asyncio.sleep(self._blocksize / self.rate)
 
+    def close(self) -> None:
+        _close_stream(self._stream, "speaker")
+        self._stream = None
+
     async def stop(self) -> None:
-        if self._stream is not None:
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None
+        self.close()
+
+
+def _close_stream(stream, label: str) -> None:
+    if stream is None:
+        return
+    try:
+        stream.stop()
+        stream.close()
+    except sd.PortAudioError as exc:
+        # A stream whose device went away can fail to stop; it is dropped either way.
+        log.warning("%s: closing the old stream failed: %s", label, exc)
+
+
+def rescan_devices() -> None:
+    """Make PortAudio enumerate the devices again. Only with every stream closed.
+
+    PortAudio reads the device list once at start-up. A Bluetooth headset that
+    switches between its music and call profiles changes rates and channels
+    underneath it, and a stream reopened from the stale list fails the same way.
+    """
+    sd._terminate()
+    sd._initialize()
 
 
 def earcon(rate: int = 24000) -> bytes:

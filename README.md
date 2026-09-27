@@ -81,6 +81,27 @@ State lives in `~/.claude-voice/`:
 - `daemon.log` is the log.
 - `transcript.jsonl` records both sides of the conversation with timestamps.
 
+## Wake word
+
+The microphone also hears you talking to other people. With `[wake] enabled`,
+only speech that opens with the assistant's name counts, for example "Cezeri,
+run the tests". A filler such as "hey" or "tamam" in front is fine. The name is
+stripped before the text reaches Claude. Anything else is dropped and never
+written to the transcript. Saying the name alone ("Cezeri.") plays the
+"heard you" blip, and the next sentence then counts without it for `window_s`
+seconds. Interrupting Claude needs the name too, so someone talking nearby does
+not cut a reply short.
+
+Choose a name that sounds like no everyday word in your language. The name is
+passed to Deepgram as a keyterm so that it is heard reliably. If it resembles a
+common word, that boost starts turning ordinary speech into false wake-ups.
+Measured on Turkish speech, "Yoda" and "Tars" were misheard as "yolda" and
+"tarz". "Cezeri", "Tulpar", "Jarvis" and "Pusula" came through cleanly with and
+without the keyterm.
+
+Speech that is not addressed to Claude still streams to Deepgram, which is how
+the name is recognised. The difference is that it goes no further.
+
 ## Code walkthroughs
 
 Ask for a walkthrough in voice mode ("walk me through the architecture"). Claude
@@ -109,10 +130,17 @@ in `voice/config.py`.
   language Claude answers in. Both default to Turkish (`tr`). Set both to your
   own, for example `en`, and Claude follows in the language it speaks.
 
-- **`[audio] mic`** defaults to the system input. With Bluetooth headphones, set
-  it to the computer's built-in microphone in `config.local.toml`. Opening a
+- **`[audio] mic`** defaults to the system input. With Bluetooth headphones, the
+  computer's built-in microphone gives the best playback quality. Opening a
   headset's microphone switches macOS to the headset profile, and playback drops
-  to phone quality.
+  to phone quality. The headset's microphone is still the one to use when you
+  want to talk from across the room. The daemon opens the microphone before the
+  speaker, so the profile switch happens before playback starts rather than in
+  the middle of it. After a long silence a headset can also drop out of that
+  profile, which kills both streams without an error reaching the daemon. Both
+  streams run continuously, so three seconds without an audio callback counts as
+  dead: the daemon re-reads the device list and reopens them, and the listener
+  sees a `[voice audio]` line.
 - **`[stt] turn_grace_ms` and `turn_grace_incomplete_ms`** set how long to wait
   after Deepgram reports silence. Deepgram's punctuation picks which one
   applies. A finished sentence gets 700 ms. Words that stop mid-sentence ("Ya

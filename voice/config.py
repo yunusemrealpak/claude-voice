@@ -64,6 +64,15 @@ class TtsConfig:
 
 
 @dataclass(frozen=True)
+class WakeConfig:
+    # When enabled, only speech that opens with one of these names is a command.
+    enabled: bool = False
+    words: tuple[str, ...] = ()
+    # After the name alone ("Cezeri."), how long the next turn counts without it.
+    window_s: float = 8.0
+
+
+@dataclass(frozen=True)
 class DaemonConfig:
     # With no listener attached for this long the daemon exits, so a closed
     # Claude session does not leave the microphone streaming. 0 disables it.
@@ -78,6 +87,7 @@ class Config:
     audio: AudioConfig = field(default_factory=AudioConfig)
     stt: SttConfig = field(default_factory=SttConfig)
     tts: TtsConfig = field(default_factory=TtsConfig)
+    wake: WakeConfig = field(default_factory=WakeConfig)
     daemon: DaemonConfig = field(default_factory=DaemonConfig)
 
 
@@ -121,6 +131,7 @@ def load_config(path: Path = CONFIG_PATH, local_path: Path = LOCAL_CONFIG_PATH) 
         audio=_section(AudioConfig, data.get("audio", {}), "audio"),
         stt=_section(SttConfig, data.get("stt", {}), "stt"),
         tts=_section(TtsConfig, data.get("tts", {}), "tts"),
+        wake=_section(WakeConfig, data.get("wake", {}), "wake"),
         daemon=_section(DaemonConfig, data.get("daemon", {}), "daemon"),
     )
 
