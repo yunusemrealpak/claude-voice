@@ -73,6 +73,13 @@ class WakeConfig:
 
 
 @dataclass(frozen=True)
+class WalkthroughConfig:
+    # Line cues fire this much before their words play. Raise it if the
+    # emphasis trails the voice, lower it (negative is fine) if it runs ahead.
+    focus_lead_ms: int = 0
+
+
+@dataclass(frozen=True)
 class DaemonConfig:
     # With no listener attached for this long the daemon exits, so a closed
     # Claude session does not leave the microphone streaming. 0 disables it.
@@ -88,6 +95,7 @@ class Config:
     stt: SttConfig = field(default_factory=SttConfig)
     tts: TtsConfig = field(default_factory=TtsConfig)
     wake: WakeConfig = field(default_factory=WakeConfig)
+    walkthrough: WalkthroughConfig = field(default_factory=WalkthroughConfig)
     daemon: DaemonConfig = field(default_factory=DaemonConfig)
 
 
@@ -132,6 +140,7 @@ def load_config(path: Path = CONFIG_PATH, local_path: Path = LOCAL_CONFIG_PATH) 
         stt=_section(SttConfig, data.get("stt", {}), "stt"),
         tts=_section(TtsConfig, data.get("tts", {}), "tts"),
         wake=_section(WakeConfig, data.get("wake", {}), "wake"),
+        walkthrough=_section(WalkthroughConfig, data.get("walkthrough", {}), "walkthrough"),
         daemon=_section(DaemonConfig, data.get("daemon", {}), "daemon"),
     )
 

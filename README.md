@@ -111,6 +111,14 @@ plans the stops, then goes through them one at a time:
 2. It explains the block with `voicectl speak --wait`.
 3. If you interrupt with a question, it answers and then asks whether to go on.
 
+Within a block, the narration can carry line cues: `{{42-45}}` before the words
+about lines 42–45. The daemon removes them from the spoken text. It uses
+ElevenLabs' character timings and the speaker's backlog to work out when those
+words will play, and at that moment puts a stronger highlight on those lines.
+The emphasis follows the voice through the block. If you interrupt, it stays
+on the lines you were hearing about. `[walkthrough] focus_lead_ms` shifts the
+timing.
+
 `vscode-extension/` is the small extension behind `show`. It registers a
 `vscode://claude-voice.claude-voice-guide/show?path=…&start=…&end=…` URI
 handler, which opens the file, highlights the lines and centres them.

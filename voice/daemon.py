@@ -17,6 +17,9 @@ to wait, the answer to that call.
 
 With a wake word, only speech that opens with the assistant's name counts: as a
 turn and as a barge-in. Everything else is dropped without being recorded.
+
+Speech may carry line cues (`{{12-15}}`, see voice/cues.py): they are removed
+from what is said and move the emphasis in VS Code as the words play.
 """
 
 from __future__ import annotations
@@ -27,10 +30,12 @@ import logging
 import os
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Awaitable, Callable
 
+from voice.cues import Cue, CueSchedule, split_cues
 from voice.stt import SpeechActivity, SttFailed, Turn
 from voice.wake import WakeWord
 
@@ -51,6 +56,11 @@ def encode(payload: dict) -> bytes:
     return (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
 
 
+def _log_focus_failure(task: asyncio.Task) -> None:
+    if not task.cancelled() and task.exception() is not None:
+        log.warning("focus: could not reach VS Code: %s", task.exception())
+
+
 @dataclass(eq=False)
 class SpeakJob:
     text: str
@@ -59,6 +69,7 @@ class SpeakJob:
     interrupted: bool = False
     # For a waiting caller interrupted by the user: resolves to what they said.
     reply: asyncio.Future | None = None
+    cues: list[Cue] = field(default_factory=list)
 
 
 class VoiceDaemon:
@@ -80,6 +91,8 @@ class VoiceDaemon:
         restart_audio=None,
         wake: WakeWord | None = None,
         wake_window_s: float = 8.0,
+        focus: Callable[[int | None, int | None], Awaitable[None]] | None = None,
+        focus_lead_ms: float = 0.0,
     ):
         self.mic = mic
         self.speaker = speaker
@@ -96,6 +109,8 @@ class VoiceDaemon:
         self._restart_audio = restart_audio or self._reopen_streams
         self.wake = wake
         self.wake_window_s = wake_window_s
+        self.focus = focus
+        self.focus_lead_ms = focus_lead_ms
         self._armed_until = 0.0
         self._ignored = 0
 
@@ -361,17 +376,40 @@ class VoiceDaemon:
 
     async def _play(self, job: SpeakJob) -> None:
         started = time.monotonic()
+        loop = asyncio.get_running_loop()
         if self.lead_in:
             # Written before synthesis starts, so the pause plays while the
             # first audio is on its way and adds almost nothing to the latency.
             self.speaker.write(self.lead_in)
-        first = True
-        async for pcm in self.tts.synthesize(job.text):
-            if first:
-                log.info("tts: first audio after %.0f ms", (time.monotonic() - started) * 1000)
-                first = False
-            self.speaker.write(pcm)
-        await self.speaker.drain()
+        schedule = None
+        if job.cues and self.focus is not None:
+            schedule = CueSchedule(job.cues, self._focus_on, rate=getattr(self.tts, "rate", 24000),
+                                   lead_s=self.focus_lead_ms / 1000)
+        try:
+            first = True
+            async for pcm in self.tts.synthesize(job.text, schedule.on_times if schedule else None):
+                if first:
+                    log.info("tts: first audio after %.0f ms", (time.monotonic() - started) * 1000)
+                    first = False
+                if schedule is not None:
+                    schedule.queued(len(pcm), loop.time() + self.speaker.backlog_seconds)
+                self.speaker.write(pcm)
+            if schedule is not None:
+                schedule.finish()
+            await self.speaker.drain()
+        finally:
+            if schedule is not None:
+                # Cut off: the emphasis stays where it was, which is what the
+                # user was looking at when they spoke up.
+                schedule.cancel()
+                if not job.interrupted and schedule.fired:
+                    self._focus_on(None)
+
+    def _focus_on(self, cue: Cue | None) -> None:
+        """Move the strong highlight to the cue's lines, or remove it."""
+        start, end = (cue.start, cue.end) if cue else (None, None)
+        task = asyncio.ensure_future(self.focus(start, end))
+        task.add_done_callback(_log_focus_failure)
 
     # ------------------------------------------------------------------ socket
 
@@ -420,10 +458,11 @@ class VoiceDaemon:
         return {"ok": False, "error": f"unknown command {cmd!r}"}
 
     async def _speak(self, request: dict, reader: asyncio.StreamReader) -> dict:
-        text = str(request.get("text") or "").strip()
-        if not text:
+        text, cues = split_cues(str(request.get("text") or "").strip())
+        if not text.strip():
             return {"ok": False, "error": "nothing to say"}
-        job = SpeakJob(text, bool(request.get("wait")), asyncio.get_running_loop().create_future())
+        job = SpeakJob(text, bool(request.get("wait")), asyncio.get_running_loop().create_future(),
+                       cues=cues)
         self._jobs.put_nowait(job)
         self._record("assistant", text)
         if not job.wait:

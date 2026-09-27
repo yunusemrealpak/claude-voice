@@ -47,6 +47,11 @@ enabled  = true
 words    = ["Cezeri"]
 window_s = 8          # after the name alone, how long the next sentence counts without it
 
+[walkthrough]
+# Line cues ({{12-15}} in narration) move a stronger highlight as the words
+# play. Positive values fire them earlier, negative later.
+focus_lead_ms = 0
+
 [daemon]
 idle_shutdown_s = 120
 reply_wait_s    = 8     # seconds of quiet, not a total: long interruptions are waited for

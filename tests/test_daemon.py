@@ -11,6 +11,7 @@ import pytest
 
 from voice.daemon import VoiceDaemon
 from voice.stt import SpeechActivity, SttFailed, Turn
+from voice.tts import CharTimes
 from voice.wake import WakeWord
 
 
@@ -72,9 +73,24 @@ class FakeTts:
     async def stop(self):
         pass
 
-    async def synthesize(self, text):
+    async def synthesize(self, text, on_times=None):
         self.spoken.append(text)
         for _ in range(self.chunks):
+            await asyncio.sleep(self.delay)
+            yield b"\x00\x00" * 240
+
+
+class TimedTts(FakeTts):
+    """Speaks one character per 10 ms chunk and reports the timings up front, as
+    ElevenLabs does: its timings run ahead of the audio."""
+
+    rate = 24000
+
+    async def synthesize(self, text, on_times=None):
+        self.spoken.append(text)
+        if on_times is not None:
+            on_times(CharTimes(0, [10.0 * i for i in range(len(text))]))
+        for _ in text:
             await asyncio.sleep(self.delay)
             yield b"\x00\x00" * 240
 
@@ -99,6 +115,10 @@ class FakeSpeaker:
 
     def clear(self):
         self.cleared += 1
+        return 0.0
+
+    @property
+    def backlog_seconds(self):
         return 0.0
 
     async def drain(self):
@@ -478,3 +498,40 @@ def test_streams_that_keep_running_are_left_alone(socket_dir):
 
     run_with_daemon(socket_dir, scenario, audio_check_interval=0.05,
                     restart_audio=lambda: attempts.append(1))
+
+
+def test_line_cues_are_not_spoken_and_move_the_emphasis_as_their_words_play(socket_dir):
+    focused = []
+
+    async def focus(start, end):
+        focused.append((start, end))
+
+    async def scenario(daemon, sock, stt, speaker, tts):
+        response = await call(sock, {"cmd": "speak", "wait": True,
+                                     "text": "Önce {{3}} giriş, sonra {{5-7}} kuyruk."})
+        assert response["result"] == "done"
+        assert tts.spoken == ["Önce giriş, sonra kuyruk."]
+        # Each cue, then back to the plain block once the narration is over.
+        assert focused == [(3, 3), (5, 7), (None, None)]
+
+    run_with_daemon(socket_dir, scenario, tts=TimedTts(delay=0.002), focus=focus)
+
+
+def test_an_interrupted_narration_keeps_the_emphasis_where_it_was(socket_dir):
+    focused = []
+
+    async def focus(start, end):
+        focused.append((start, end))
+
+    async def scenario(daemon, sock, stt, speaker, tts):
+        text = "Önce {{3}} giriş" + ", sonra uzun bir açıklama" * 10 + " ve {{9}} son."
+        await call(sock, {"cmd": "speak", "text": text})
+        for _ in range(100):
+            if focused:
+                break
+            await asyncio.sleep(0.01)
+        stt.emit(SpeechActivity("dur"))
+        await asyncio.sleep(0.1)
+        assert focused == [(3, 3)]
+
+    run_with_daemon(socket_dir, scenario, tts=TimedTts(delay=0.005), focus=focus)

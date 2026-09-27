@@ -11,14 +11,12 @@ import sys
 import time
 
 from pathlib import Path
-from urllib.parse import urlencode
 
 from voice import client
 from voice.client import DaemonNotRunning
 from voice.paths import LOG_PATH, REPO_ROOT, SOCKET_PATH, STATE_DIR
 
 START_TIMEOUT = 20.0
-GUIDE_EXTENSION = "claude-voice.claude-voice-guide"
 
 
 def _print_status(status: dict) -> None:
@@ -148,8 +146,10 @@ def cmd_listen(args) -> int:
 
 def cmd_show(args) -> int:
     """Open a file in VS Code with a line range highlighted, via the guide extension."""
+    from voice.vscode import guide_uri, open_uri
+
     if args.clear:
-        uri = f"vscode://{GUIDE_EXTENSION}/clear"
+        uri = guide_uri("clear")
     else:
         if not args.file:
             print("show needs FILE [START [END]] or --clear")
@@ -159,9 +159,8 @@ def cmd_show(args) -> int:
             print(f"no such file: {path}")
             return 1
         start = args.start or 1
-        query = urlencode({"path": str(path), "start": start, "end": args.end or start})
-        uri = f"vscode://{GUIDE_EXTENSION}/show?{query}"
-    subprocess.run(["open", uri], check=True)
+        uri = guide_uri("show", path=str(path), start=start, end=args.end or start)
+    open_uri(uri)
     print("shown")
     return 0
 

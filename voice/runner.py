@@ -9,6 +9,7 @@ from pathlib import Path
 from voice.config import Config, Keys
 from voice.daemon import VoiceDaemon
 from voice.paths import TRANSCRIPT_PATH
+from voice.vscode import focus
 from voice.wake import WakeWord
 
 
@@ -63,6 +64,8 @@ def build(cfg: Config, keys: Keys) -> VoiceDaemon:
         transcript_path=TRANSCRIPT_PATH,
         wake=wake,
         wake_window_s=cfg.wake.window_s,
+        focus=focus,
+        focus_lead_ms=cfg.walkthrough.focus_lead_ms,
     )
 
 

@@ -11,7 +11,8 @@ import base64
 import json
 import logging
 import time
-from typing import AsyncIterator
+from dataclasses import dataclass
+from typing import AsyncIterator, Callable
 from urllib.parse import urlencode
 
 from websockets.asyncio.client import connect
@@ -36,6 +37,19 @@ REFRESH_INTERVAL = 20.0
 
 class TtsError(RuntimeError):
     """Raised when synthesis fails in a way the caller must know about."""
+
+
+@dataclass(frozen=True)
+class CharTimes:
+    """When characters of the synthesized text are spoken.
+
+    `first` is the index in the text of the first character covered, and
+    `starts_ms[i]` is when character `first + i` starts, in ms from the start of
+    the generated audio.
+    """
+
+    first: int
+    starts_ms: list[float]
 
 
 class ElevenLabsTts:
@@ -151,8 +165,18 @@ class ElevenLabsTts:
         await socket.send(json.dumps({"text": text.strip() + " "}, ensure_ascii=False))
         await socket.send(json.dumps({"text": ""}))
 
-    async def synthesize(self, text: str) -> AsyncIterator[bytes]:
+    async def synthesize(
+        self, text: str, on_times: Callable[[CharTimes], None] | None = None,
+    ) -> AsyncIterator[bytes]:
+        """Yield PCM as it is generated; report character timings to `on_times`.
+
+        ElevenLabs sends timings in blocks that run ahead of the audio, each
+        timed from its own start, and consecutive: a block begins where the
+        previous one's last character ends.
+        """
         socket = await self._take_socket()
+        next_char = 0
+        block_start_ms = 0.0
         try:
             try:
                 await self._begin(socket, text)
@@ -169,6 +193,16 @@ class ElevenLabsTts:
                 event = json.loads(message)
                 if event.get("error") or event.get("code"):
                     raise TtsError(f"{event.get('code')}: {event.get('message') or event}")
+                alignment = event.get("alignment") or {}
+                chars = alignment.get("chars") or []
+                if chars:
+                    starts = alignment.get("charStartTimesMs") or []
+                    durations = alignment.get("charDurationsMs") or []
+                    if on_times is not None and len(starts) == len(chars):
+                        on_times(CharTimes(next_char, [block_start_ms + t for t in starts]))
+                    next_char += len(chars)
+                    if starts and durations:
+                        block_start_ms += starts[-1] + durations[-1]
                 if event.get("audio"):
                     yield base64.b64decode(event["audio"])
                 if event.get("isFinal"):

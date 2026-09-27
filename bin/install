@@ -23,7 +23,7 @@ if command -v code >/dev/null && command -v npx >/dev/null; then
   (cd "$ROOT/vscode-extension" && npx --yes @vscode/vsce package --allow-missing-repository \
      -o "$ROOT/build/claude-voice-guide.vsix" >/dev/null)
   code --install-extension "$ROOT/build/claude-voice-guide.vsix" --force >/dev/null 2>&1
-  echo "VS Code extension installed"
+  echo "VS Code extension installed; windows already open pick up a new version after Developer: Reload Window"
 else
   echo "skipped the VS Code extension: needs the 'code' command and npx" >&2
 fi

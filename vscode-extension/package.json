@@ -1,8 +1,8 @@
 {
   "name": "claude-voice-guide",
   "displayName": "Claude Voice Guide",
-  "description": "Lets claude-voice open a file and highlight lines while it explains the code aloud.",
-  "version": "0.2.0",
+  "description": "Lets claude-voice open a file and highlight lines while it explains the code aloud, with the lines being talked about emphasised as the words are spoken.",
+  "version": "0.3.0",
   "publisher": "claude-voice",
   "license": "MIT",
   "engines": {

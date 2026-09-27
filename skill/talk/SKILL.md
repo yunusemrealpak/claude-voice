@@ -131,13 +131,21 @@ When the user asks to be walked through code ("explain the architecture",
    the tour shift them. The narration explains what the highlighted code does
    and why it is built that way. It points at what is on screen ("the check at
    the top of the highlighted block...") and never reads code aloud.
-5. **After each stop:**
+5. **Line cues.** When the narration moves through distinct parts of the block,
+   put `{{N}}` or `{{N-M}}` (file line numbers, inside the shown range) right
+   before the words about those lines. Those lines get a stronger highlight at
+   the moment the words are spoken; the markers themselves are not spoken:
+   `speak --wait "It first {{42-45}} checks the token, and only then {{47}} takes the lock."`
+   Use two to five cues per stop, at the points where attention should move,
+   not on every sentence. A cue covers at most a few lines; the stop's range
+   already shows the whole block. Without cues the stop works as before.
+6. **After each stop:**
    - `done`: go on to the next stop.
    - `interrupted; the user said: X`: X is a question or an instruction. Answer
      it, showing other code if that helps. Then ask aloud with `speak --wait`
      whether to continue from where you stopped, and act on the answer. "Stop"
      or "enough" ends the tour.
-6. **At the end:** `$VOICECTL show --clear`, then a spoken summary of two or
+7. **At the end:** `$VOICECTL show --clear`, then a spoken summary of two or
    three sentences.
 
 ## Commands
@@ -150,6 +158,7 @@ When the user asks to be walked through code ("explain the architecture",
 | `$VOICECTL mute` / `unmute` | stop / resume hearing the user |
 | `$VOICECTL show FILE START END` | open FILE in VS Code with those lines highlighted |
 | `$VOICECTL show --clear` | remove the highlight |
+| `{{N}}` / `{{N-M}}` in speak text | emphasise those lines of the shown file as the words play |
 | `$VOICECTL status` | listening/speaking state, devices |
 | `$VOICECTL shutdown` | stop the daemon |
 
